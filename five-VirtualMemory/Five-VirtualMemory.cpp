@@ -14,9 +14,77 @@ std::setfill：设置std::setw将填充什么样的字符,如:std::setfill('*')
 // 工程vmwalker 
 #include <windows.h> 
 #include <iostream> 
+#include <vector>
+#include <algorithm>
 #include <shlwapi.h> 
 #include <iomanip> 
 #pragma comment(lib, "Shlwapi.lib") 
+
+struct Record{
+	char* pBlock;
+	char* pEnd;
+	char* szSize;
+	char* state;
+	char* protect;
+	char* type;
+	char* module_szFilename;
+
+
+	Record() {
+		pBlock = (char*)malloc(sizeof(char) * 32);
+		pEnd = (char*)malloc(sizeof(char) * 32);
+		szSize = (char*)malloc(sizeof(char) * 32);
+		state = (char*)malloc(sizeof(char) * 32);
+		protect = (char*)malloc(sizeof(char) * 32);
+		type = (char*)malloc(sizeof(char) * 32);
+		module_szFilename = (char*)malloc(sizeof(char) * 32);
+	}
+
+	~Record() {
+		pBlock = NULL;
+		pEnd = NULL;
+		szSize = NULL;
+		state = NULL;
+		protect = NULL;
+		type = NULL;
+		module_szFilename = NULL;
+	}
+
+	bool operator <(const Record &other)const   //升序排序    
+	{
+		if (strcmp(state, other.state) == 0) {
+			if (strcmp(pBlock, other.pBlock) > 0)
+				return false;
+			else
+				return true;
+		}
+		else if (strcmp(state, other.state) > 0) {
+			return false;
+		}
+		else {
+			return true;
+		}
+	}
+
+};
+
+
+
+bool cmp(const Record& p, const Record& q) {
+	if (strcmp(p.state, q.state) == 0) {
+		if (strcmp(p.pBlock, q.pBlock) > 0)
+			return false;
+		else
+			return true;
+	} else if (strcmp(p.state, q.state) > 0) {
+		return false;
+	}
+	else {
+		return true;
+	}
+}
+
+std::vector<Record> v;
 
 // 以可读方式对用户显示保护的辅助方法。 
 // 保护标记表示允许应用程序对内存进行访问的类型 
@@ -28,10 +96,10 @@ inline bool TestSet(DWORD dwTarget, DWORD dwMask)
 
 #define SHOWMASK(dwTarget, type) \
 if (TestSet(dwTarget, PAGE_##type) ) \
- {std :: cout << ", " << #type; }
+ {std :: cout << ", " << #type; /*printf("__%s__", #type);*/ return (char*)#type; }
 
 
-void ShowProtection(DWORD dwTarget)
+char* ShowProtection(DWORD dwTarget)
 {
 	SHOWMASK(dwTarget, READONLY);
 	SHOWMASK(dwTarget, GUARD);
@@ -48,6 +116,8 @@ void ShowProtection(DWORD dwTarget)
 // 遍历整个虚拟内存并对用户显示其属性的工作程序的方法 
 void WalkVM(HANDLE hProcess)
 {
+	
+
 	// 首先，获得系统信息 
 	SYSTEM_INFO si;
 	::ZeroMemory(&si, sizeof(si));
@@ -61,8 +131,7 @@ void WalkVM(HANDLE hProcess)
 	LPCVOID pBlock = (LPVOID)si.lpMinimumApplicationAddress;     
 	while (pBlock < si.lpMaximumApplicationAddress)
 	{
-
-		std::cout << "\n";
+		Record rec;                             
 
 		// 获得下一个虚拟内存块的信息
 		if (::VirtualQueryEx(
@@ -75,8 +144,8 @@ void WalkVM(HANDLE hProcess)
 			LPCVOID pEnd = (PBYTE)pBlock + mbi.RegionSize;
 			TCHAR szSize[MAX_PATH];
 			::StrFormatByteSize(mbi.RegionSize, szSize, MAX_PATH);
-
-			// 显示块地址和大小      
+			
+			// 1.显示块地址和大小      
 			std::cout.fill('0');             
 			std::cout
 				<< std::hex << std::setw(8) << (DWORD)pBlock
@@ -84,34 +153,55 @@ void WalkVM(HANDLE hProcess)
 				<< std::hex << std::setw(8) << (DWORD)pEnd
 				<< (::strlen(szSize) == 7 ? " (" : " (") << szSize
 				<< ") ";
+			
+			sprintf(rec.pBlock, "%08x", (DWORD)pBlock);
+			sprintf(rec.pEnd, "%08x", (DWORD)pEnd);
+			sprintf(rec.szSize, "%7s", szSize);
 
-			// 显示块的状态 
+			// 2.显示块的状态 
 			switch (mbi.State)
 			{
 				case MEM_COMMIT:
-					std::cout << "Committed";  break;                 
+					std::cout << "Committed";  
+					sprintf(rec.state, "%-9s", "Committed");
+					break;                 
 				case MEM_FREE:
-					std::cout << "Free";  break;
+					std::cout << "Free";  
+					sprintf(rec.state, "%-9s", "Free");
+					break;
 				case MEM_RESERVE:
-					std::cout << "Reserved";  break;
+					std::cout << "Reserved";  
+					sprintf(rec.state, "%-9s", "Reserved");
+					break;
 			}
 
-			// 显示保护    
+
+			// 3.显示保护    
 			if(mbi.Protect==0 && mbi.State!=MEM_FREE) 
 				{    mbi.Protect = PAGE_READONLY;     }
-			ShowProtection(mbi.Protect);
+			char* tmp = ShowProtection(mbi.Protect);
 
-			// 显示类型             
+			sprintf(rec.protect, "%-17s  ", tmp);
+
+			// 4.显示类型             
 			switch(mbi.Type){                 
 				case MEM_IMAGE : 
-					std::cout << ", Image"; break;     
+					std::cout << ", Image";
+					sprintf(rec.type, "%-7s", "Image");
+					break;
 				case MEM_MAPPED:      
-					std::cout << ", Mapped"; break;                 
+					std::cout << ", Mapped"; 
+					sprintf(rec.type, "%-7s", "Mapped");
+					break;
 				case MEM_PRIVATE:
-					std::cout << ", Private"; break;
+					std::cout << ", Private"; 
+					sprintf(rec.type, "%-7s", "Private");
+					break;
+				default:
+					sprintf(rec.type, "%-7s", "无");
 			}
-			
-			// 检验可执行的影像 
+
+			// 5.检验可执行的影像 
 			TCHAR szFilename[MAX_PATH];             
 			if (::GetModuleFileName(
 				(HMODULE)pBlock,		 // 实际虚拟内存的模块句柄     
@@ -121,11 +211,20 @@ void WalkVM(HANDLE hProcess)
 				// 除去路径并显示 
 				::PathStripPath(szFilename);                 
 				std::cout << ", Module: " << szFilename;
+				sprintf(rec.module_szFilename, "%s", szFilename);
 			}
+			else {
+				sprintf(rec.module_szFilename, "%s", "无");
+			}
+
 			std::cout << std::endl;
 
+			//printf("%s - %s = %s, %s , %s, %s, %s \n", rec.pBlock, rec.pEnd, rec.szSize, rec.state, rec.protect, rec.type, rec.module_szFilename);
+			
+			v.push_back(rec);
+
 			// 移动块指针以获得下一下个块             
-			pBlock = pEnd; 
+			pBlock = pEnd;
 		}
 	}
 }
@@ -151,7 +250,7 @@ void ShowVirtualMemory()
 	std::cout.fill('0');     
 	std::cout << "Minimum application address: 0x" << std::hex << std::setw(8)
 			  << (DWORD)si.lpMinimumApplicationAddress
-			  << std::endl;     
+			  << std::endl;
 	std::cout << "Maximum application address: 0x" << std::hex << std::setw(8)
 			  << (DWORD)si.lpMaximumApplicationAddress
 			  << std::endl;
@@ -166,6 +265,16 @@ int main()
 	// 遍历当前进程的虚拟内存 
 	::WalkVM(::GetCurrentProcess());
 
+	std::sort(v.begin(), v.end() );
+	//std::sort(v.begin(), v.end(), cmp);
+
+	printf("\n\n\n\n------------------------------------------------\n\n\n\n");
+	printf("数据条数：%d\n\n", v.size());
+	std::vector<Record>::iterator it;
+	printf("      地   址      大  小 地址类型   访问权限            描  述\n");
+	for (it = v.begin(); it != v.end(); it++) {
+		printf("%s %s %s %s %s %s %s \n", (*it).pBlock, (*it).pEnd, (*it).szSize, (*it).state, (*it).protect, (*it).type, (*it).module_szFilename);
+	}
 
 	printf("\n\n");
 	system("pause");
